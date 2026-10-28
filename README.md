@@ -75,16 +75,48 @@ uv run neko-plugin check now_playing
 uv run neko-plugin check -r now_playing
 ```
 
-Python runtime dependencies are declared in `pyproject.toml` and synced into
-`vendor/` for packaging. The generated `vendor/` directory is not committed;
-local builds and CI recreate it before release checks.
+This plugin declares no runtime Python dependencies in `pyproject.toml`. The
+WinRT bindings it needs (`winrt-runtime`, `winrt-Windows.Media.Control`,
+`winrt-Windows.Foundation`, `winrt-Windows.Foundation.Collections`,
+`typing_extensions`) are committed under `vendor/`, which the plugin loader
+prepends to `sys.path` — the same convention the official plugins follow. So
+`neko-plugin sync` has nothing to install and the package works offline with
+no pip step.
 
-Python 运行时依赖声明在 `pyproject.toml` 中，并在打包时同步到 `vendor/`。
-生成的 `vendor/` 不提交；本地构建和 CI 会在发布检查前重新生成它。
+If you would rather install those wheels from PyPI (Windows only — that is
+where the wheels exist), they are still listed in the optional `win32` extra:
 
-Python ランタイム依存関係は `pyproject.toml` に宣言し、パッケージ化時に
-`vendor/` へ同期します。生成された `vendor/` はコミットせず、ローカルビルドと
-CI が公開前チェックで再生成します。
+```bash
+pip install -e ".[win32]"
+```
+
+本插件在 `pyproject.toml` 中不声明运行时 Python 依赖。它用到的 WinRT 绑定
+（`winrt-runtime`、`winrt-Windows.Media.Control`、`winrt-Windows.Foundation`、
+`winrt-Windows.Foundation.Collections`、`typing_extensions`）已提交在 `vendor/`
+目录中，插件加载器会把它加到 `sys.path` 前面——与官方插件仓库的做法一致。
+因此 `neko-plugin sync` 无需安装任何东西，离线宿主不用 pip 也能直接跑。
+
+若想改从 PyPI 安装这些轮子（仅 Windows 有轮子），它们仍保留在可选的 `win32`
+extra 中：
+
+```bash
+pip install -e ".[win32]"
+```
+
+本プラグインは `pyproject.toml` にランタイム Python 依存関係を宣言していません。
+必要な WinRT バインディング（`winrt-runtime`、`winrt-Windows.Media.Control`、
+`winrt-Windows.Foundation`、`winrt-Windows.Foundation.Collections`、
+`typing_extensions`）は `vendor/` にコミット済みで、プラグインローダーが
+`sys.path` の先頭に追加します（公式プラグインと同じ方式）。そのため
+`neko-plugin sync` は何もインストールせず、オフラインのホストでも pip 無しで
+動作します。
+
+PyPI から入れたい場合（Windows のみ、wheel が存在する環境）は任意の `win32`
+extra に残してあります。
+
+```bash
+pip install -e ".[win32]"
+```
 
 ## Market release / Market 发布 / Market 公開
 
