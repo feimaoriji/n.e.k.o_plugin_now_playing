@@ -1,11 +1,17 @@
 [project]
 name = "now_playing"
 version = "0.1.0"
-# WinRT bindings for reading Windows SMTC (系统媒体会话).
-# The modular winrt-* packages are split: Media.Control alone does not pull in
-# Windows.Foundation, so the base namespaces it depends on are declared here
-# explicitly (otherwise `request_async()` fails with ModuleNotFoundError).
-dependencies = [
+# 运行时不声明第三方依赖：WinRT 绑定（winrt-runtime / winrt-Windows.* /
+# typing_extensions）已随 vendor/ 一起提交，宿主直接可用。
+# 这样做是为了对齐官方插件仓库的通行姿势 —— 依赖声明里出现 "Name" 形式的
+# WinRT 包名时，pip 在非 Windows 平台（如 CI 的 ubuntu）无轮子可装会直接失败。
+dependencies = []
+# 可选：不想用随包 vendor、希望从 PyPI 装一套（仅 Windows 有轮子）时用
+#   pip install -e ".[win32]"
+# winrt-* 是拆包模块：Media.Control 单独装不会带上 Windows.Foundation，
+# 所以这里把它依赖的命名空间显式列全（否则 request_async() 会 ModuleNotFoundError）。
+[project.optional-dependencies]
+win32 = [
     "winrt-Windows.Media.Control",
     "winrt-Windows.Foundation",
     "winrt-Windows.Foundation.Collections",

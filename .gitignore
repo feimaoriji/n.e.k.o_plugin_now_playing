@@ -5,7 +5,12 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
-vendor/
+# vendor/ 里的 WinRT 依赖是随包提交的（官方插件仓库的通行做法），不忽略；
+# 只排掉运行时产物：__pycache__/、.lock（sync 用的空锁文件）。
+vendor/.lock
+# 上面的 *.py[cod] 会连 .pyd 一起吃掉，但 vendor 里的 .pyd 是真正要随包提交的
+# 编译扩展（_winrt*.cp311-win_amd64.pyd），必须重新放行。
+!vendor/**/*.pyd
 /.vendor.staging-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
 /.vendor.backup-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
 /.vendor.backup-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].pending
