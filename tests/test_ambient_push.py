@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from plugin.plugins import now_playing as np_mod
 from plugin.plugins.now_playing import NowPlayingPlugin, _ambient_ttl_for_interval
 
