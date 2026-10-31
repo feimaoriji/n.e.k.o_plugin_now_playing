@@ -309,8 +309,9 @@ class NowPlayingPlugin(NekoPluginBase):
 
         与 :meth:`_push` 的区别：
 
-        * ``context_type`` 换成 ``now_playing_chat`` —— 不会命中 core 的
-          now_playing 旁路，而是正常落进 ``pending_agent_callbacks``；
+        * ``context_type`` 换成 ``now_playing_chat`` —— 与 A 通道的 ambient
+          快照是两个命名空间，正常落进 ``pending_agent_callbacks``，不会被
+          宿主当成背景事实；
         * 带 ``expires_in_s`` —— 队列里的旧快照会自动过期，不会拿停播前的歌
           去污染很久之后的对话；
         * 只在**正在播放**时推 —— 停播无需专门推「没在放」，最后一条 TTL 到了
