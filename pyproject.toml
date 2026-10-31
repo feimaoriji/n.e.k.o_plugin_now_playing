@@ -1,6 +1,6 @@
 [project]
 name = "now_playing"
-version = "0.1.0"
+version = "0.2.0"
 # 运行时不声明第三方依赖：WinRT 绑定（winrt-runtime / winrt-Windows.* /
 # typing_extensions）已随 vendor/ 一起提交，宿主直接可用。
 # 这样做是为了对齐官方插件仓库的通行姿势 —— 依赖声明里出现 "Name" 形式的

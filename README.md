@@ -16,17 +16,31 @@ N.E.K.O に渡します。彼女が自分から話しかけるときも、通常
 ## 特性 · Features · 特徴
 
 - 只读系统媒体会话：不改播放器、不注入、不依赖任何平台的私有 API
-- 双通道喂上下文：主动搭话轮（心跳）与文本聊天轮各一条，各自去重只留最新
-- 30s 新鲜度：暂停 / 关掉播放器超过 30s 就当「没在放」，不会瞎编
+- 双通道喂上下文：主动搭话轮走宿主 ambient 环境快照通道，文本聊天轮走原生
+  passive 队列，各自去重只留最新
+- TTL 撑住心跳间隔：环境快照默认 `max(3×间隔, 30s)`，夹在 1–3600s，不会出现
+  「两次心跳之间事实已过期」的空窗
 - 可选歌词（默认关）：打开后附带一行歌词，带缓存与超时保护
 - 全部行为都可被 `NOW_PLAYING_*` 环境变量覆盖，默认开箱即用
+
+## 契约要点 · Contract notes
+
+- 主动搭话（A）：`metadata.context_type = "ambient"`，
+  `metadata.ambient = {provider: "now_playing", ttl_s, priority: 0, text, data}`；
+  `ambient.text` 与 `parts[0]["text"]` 完全一致，`visibility=[]`，
+  行为 `blind`（旧宿主映射为 silent，事件不进 LLM；新宿主只看 `context_type`），
+  `coalesce_key = "ambient:now_playing"`。环境快照不落队、不渲染、不触发搭话。
+- 文本回复（B）：`metadata.context_type = "now_playing_chat"` +
+  `expires_in_s`，行为 `read`，`coalesce_key = "now-playing-chat"`；
+  进 passive 队列，下一个用户文本轮被 drain。
 
 ## 配置 · Configuration · 設定
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `NOW_PLAYING_AUTOSTART` | `true` | 插件启动后自动开始后台轮询 |
-| `NOW_PLAYING_INTERVAL_S` | `5.0` | 轮询间隔（秒），必须 < 30（新鲜度阈值），下限 1 |
+| `NOW_PLAYING_INTERVAL_S` | `5.0` | 轮询间隔（秒），下限 1 |
+| `NOW_PLAYING_AMBIENT_TTL_S` | 自动 | 环境快照（主动搭话通道）有效期；默认 `max(3×间隔, 30s)`，夹在 1–3600s |
 | `NOW_PLAYING_CHAT_CONTEXT` | `true` | 文本聊天轮也喂快照（passive 队列 + TTL） |
 | `NOW_PLAYING_CHAT_TTL_S` | 自动 | 文本通道快照有效期；默认 `2×间隔+2s`，夹在 8–60s |
 | `NOW_PLAYING_INCLUDE_LYRIC` | `false` | 是否附带一行歌词（联网取，按曲缓存） |

@@ -2,9 +2,9 @@
 id = "now_playing"
 name = "正在播放"
 short_description = "把系统正在播放的歌（SMTC）喂给 N.E.K.O，让她的主动搭话和文本聊天都知道此刻在放什么"
-description = "读取 Windows 系统媒体会话（SMTC），把「此刻电脑在放什么」送进 N.E.K.O 的上下文：主动搭话时她知道现在是哪首歌，普通文本聊天那一轮也能拿到同一份快照。双通道各自去重只留最新一条，快照 30s 新鲜度（暂停/关闭播放器即视为没在放），可选附带歌词。只读系统媒体会话，不改播放器、不注入。"
+description = "读取 Windows 系统媒体会话（SMTC），把「此刻电脑在放什么」送进 N.E.K.O 的上下文：主动搭话时她知道现在是哪首歌，普通文本聊天那一轮也能拿到同一份快照。双通道各自去重只留最新一条，快照 30s 新鲜度（暂停/关闭播放器即视为没在放），可选附带歌词。主动搭话走宿主 ambient 环境快照通道；宿主不支持时自动不生效，不影响其它功能。只读系统媒体会话，不改播放器、不注入。"
 keywords = ["now-playing", "smtc", "media-session", "music", "lyrics", "context", "windows", "passive-context"]
-version = "0.1.0"
+version = "0.2.0"
 type = "plugin"
 entry = "plugin.plugins.now_playing:NowPlayingPlugin"
 

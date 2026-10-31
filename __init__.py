@@ -4,16 +4,17 @@
 N.E.K.O 的自主搭话链路 —— 纯事实：歌名 / 歌手（可选：当前歌词行）。
 不触发搭话，只在她自己开口那一刻作为背景信息可用。
 
-数据通路（与 core 侧接线约定一致，详见
-``notes/now_playing_core_改动说明_1007a.md``）::
+数据通路（与宿主 ambient 环境快照契约一致，见
+``docs/plugins/sdk-reference.md`` 的 Ambient context 一节）::
 
-    本插件 ─┬─ 心跳 A：push_message(ai_behavior="read",
-            │   metadata.context_type="now_playing") ──> 宿主 ingest
-            │   --> core.proactive...enqueue_agent_callback 入口旁路
-            │   --> 只存快照 self._latest_now_playing（绝不落队）
+    本插件 ─┬─ 心跳 A（环境快照）：push_message(visibility=[],
+            │   行为=blind, coalesce_key="ambient:now_playing",
+            │   metadata={"context_type": "ambient", "ambient": {...}})
+            │   ──> 宿主 EventBus：context_type == "ambient" 早退分支
+            │   --> core.proactive.note_ambient_context()（同 provider 覆盖）
             │   --> 自主搭话 Phase 2 prompt 末尾拼「此刻在播放《X》— Y」
             │
-            └─ 心跳 B：push_message(ai_behavior="read",
+            └─ 心跳 B（文本回复）：push_message(行为=read,
                 metadata.context_type="now_playing_chat",
                 metadata.expires_in_s=<TTL>) ──> 正常的 passive 队列
                 --> 下一个**用户文本轮**被 drain，随 user message 一起进
@@ -21,24 +22,33 @@ N.E.K.O 的自主搭话链路 —— 纯事实：歌名 / 歌手（可选：当�
                 --> 于是她**回话时**也知道此刻在放什么
 
 两条心跳互不干扰：
-  * A 走 core 旁路（不落队），只服务自主搭话；
+  * A 走宿主 ambient 环境快照通道（不落队、不渲染、不触发搭话），只服务自主搭话；
   * B 是 NEKO 原生 passive 链路（落队 → 用户轮 drain），只服务文本回复。
-    B 不能带 ``context_type="now_playing"``，否则会被 core 旁路吞掉、进不了队。
+    B 的 ``context_type`` 是 ``now_playing_chat``，与 A 的 ``ambient`` 互不干扰。
   * B 带 ``expires_in_s`` 让队列里的旧快照自动过期：心跳每 5s 刷新一条，
     所以任意时刻队列里那条都 ≤5s；播放一停，最后一条在 TTL 内自动消失，
     不会拿一首早就不放了的歌去污染后面的对话。
 
 契约要点（改这块之前必须对齐）：
-  * ``parts`` 里的 text 不能为空 —— core 只在 ``if text or ...`` 内建 callback；
-  * ``visibility=[]`` —— 不在聊天窗冒系统气泡；
-  * ``ai_behavior="read"`` —— 派生 passive，**绝不触发她开口**；
-  * A 的 ``coalesce_key="now-playing"`` / B 的 ``"now-playing-chat"`` ——
-    各自心跳去重，只留最新一条；
-  * A 靠 ``metadata.context_type="now_playing"`` 被 core 识别；
-  * **A 的新鲜度 30s**：core 读到超过 30s 的快照就当「没在放」，所以心跳间隔
-    必须 < 30s（默认 5s），否则她搭话时会判定没在放。
-  * **B 的 TTL**：必须 > 心跳间隔，否则用户开口时永远刚好过期；
-    默认 ``max(2×间隔+2s, 8s)``（5s 间隔 → 12s）。
+  * A（环境快照）：
+    - ``metadata.context_type="ambient"``，``metadata.ambient`` 含
+      ``provider="now_playing"``（固定字面量）、``ttl_s``、``priority=0``、
+      ``text``、``data={playing,title,artist,source_app_id[,lyric]}``；
+    - ``ambient.text`` 与 ``parts[0]["text"]`` 必须完全一致（宿主两处都会读）；
+    - ``visibility=[]`` —— 不在聊天窗冒系统气泡；
+    - 行为=blind —— 只为**旧宿主**兜底（旧宿主把 blind 映射成 silent，事件不进
+      LLM）；新宿主早退只看 ``metadata.context_type``，不看行为字段；
+    - ``coalesce_key="ambient:now_playing"`` —— 心跳去重，只留最新一条；
+    - ``ttl_s = max(3×轮询间隔, 30s)``，再夹到 ``[1, 3600]``（与宿主
+      ``_AMBIENT_TTL_MIN_S/_MAX_S`` 一致）。ttl 必须 > 轮询间隔，
+      否则两次心跳之间会出现「事实已过期」的空窗。
+  * B（文本回复）：
+    - ``visibility=[]``；行为=read —— 派生 passive，**绝不触发她开口**；
+    - ``metadata.context_type="now_playing_chat"``（绝不能是 A 的 ``ambient``）、
+      ``metadata.expires_in_s=<TTL>``；
+    - ``coalesce_key="now-playing-chat"`` —— 只留最新一条；
+    - TTL 必须 > 轮询间隔，否则用户开口时永远刚好过期；
+      默认 ``max(2×间隔+2s, 8s)``（5s 间隔 → 12s），夹在 [8s, 60s]。
 
 为什么用后台线程而不是 asyncio 任务：
     SDK 经**临时 asyncio.run()** 调用 ``@lifecycle(id="startup")``
@@ -56,6 +66,7 @@ N.E.K.O 的自主搭话链路 —— 纯事实：歌名 / 歌手（可选：当�
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -76,12 +87,17 @@ from . import smtc
 # ---------------------------------------------------------------------------
 # 常量 / 可调项（都可用环境变量覆盖；见 _env_float / _env_bool）
 # ---------------------------------------------------------------------------
-_DEFAULT_INTERVAL_S = 5.0  # 轮询间隔；必须 < core 的 30s 新鲜度阈值
+_DEFAULT_INTERVAL_S = 5.0  # 轮询间隔
 _MIN_INTERVAL_S = 1.0
-_COALESCE_KEY = "now-playing"
-_CONTEXT_TYPE = "now_playing"
+# 环境快照（A）：宿主 ambient 契约的固定字段与边界（以宿主 _AMBIENT_* 为准）。
+_AMBIENT_PROVIDER = "now_playing"
+_AMBIENT_COALESCE_KEY = "ambient:now_playing"
+_AMBIENT_PRIORITY = 0
+_AMBIENT_TTL_MIN_S = 1.0
+_AMBIENT_TTL_MAX_S = 3600.0
+_AMBIENT_TTL_DEFAULT_S = 30.0
+_AMBIENT_TTL_INTERVAL_FACTOR = 3.0
 # 「文本回复」副通道：走 NEKO 原生 passive 队列，用户开口那轮被 drain。
-# 必须换一个 context_type，否则会被 core 的 now_playing 旁路当成心跳 A 吞掉。
 _CHAT_COALESCE_KEY = "now-playing-chat"
 _CHAT_CONTEXT_TYPE = "now_playing_chat"
 _CHAT_TTL_MIN_S = 8.0
@@ -135,6 +151,35 @@ def _chat_ttl_for_interval(interval_s: float, override_s: float = 0.0) -> float:
     return min(max(raw, _CHAT_TTL_MIN_S), _CHAT_TTL_MAX_S)
 
 
+def _ambient_ttl_for_interval(interval_s: float, override_s: float = 0.0) -> float:
+    """环境快照（A）的过期时间：必须 > 轮询间隔。
+
+    宿主 ``get_ambient_contexts`` 只认 ``age < ttl`` 的快照 —— 一条超过自身
+    TTL 的记录会被当作「事实已过期」直接丢弃。心跳每个轮询间隔才刷新一次，
+    所以 TTL 若 ≤ 间隔，两次心跳之间就会出现一个空窗：宿主在这段时间读到
+    「没在放」，而她本来该看到正在播放。因此基准取 ``max(3×间隔, 30s)``，
+    再夹到 ``[1, 3600]``（与宿主 ``_AMBIENT_TTL_MIN_S/_MAX_S`` 一致）。
+
+    显式覆盖（``NOW_PLAYING_AMBIENT_TTL_S``）只在是有限正数时生效；
+    ``0`` / 负数 / ``NaN`` / 非数一律落回计算值，绝不让 TTL 变成 0 或 inf。
+    """
+
+    try:
+        base = float(interval_s)
+    except (TypeError, ValueError):
+        base = _DEFAULT_INTERVAL_S
+    if not math.isfinite(base) or base <= 0:
+        base = _DEFAULT_INTERVAL_S
+    computed = max(_AMBIENT_TTL_INTERVAL_FACTOR * base, _AMBIENT_TTL_DEFAULT_S)
+
+    try:
+        override = float(override_s)
+    except (TypeError, ValueError):
+        override = 0.0
+    raw = override if math.isfinite(override) and override > 0 else computed
+    return min(max(raw, _AMBIENT_TTL_MIN_S), _AMBIENT_TTL_MAX_S)
+
+
 @neko_plugin
 class NowPlayingPlugin(NekoPluginBase):
     """把当前系统播放内容持续喂给 NEKO 的自主搭话链路（只读，不控制播放器）。"""
@@ -156,6 +201,11 @@ class NowPlayingPlugin(NekoPluginBase):
 
         interval = _env_float("NOW_PLAYING_INTERVAL_S", _DEFAULT_INTERVAL_S)
         self._interval_s = interval if interval >= _MIN_INTERVAL_S else _DEFAULT_INTERVAL_S
+        # 环境快照（A）：TTL 必须 > 轮询间隔，否则两次心跳之间会空窗。
+        self._ambient_ttl_s = _ambient_ttl_for_interval(
+            self._interval_s,
+            _env_float("NOW_PLAYING_AMBIENT_TTL_S", 0.0),
+        )
         # 文本回复通道（B）：默认开。关掉只影响「回话时知不知道在放歌」，
         # 自主搭话那条 A 链不受影响。
         self._chat_context = _env_bool("NOW_PLAYING_CHAT_CONTEXT", True)
@@ -163,9 +213,8 @@ class NowPlayingPlugin(NekoPluginBase):
             self._interval_s,
             _env_float("NOW_PLAYING_CHAT_TTL_S", 0.0),
         )
-        # 歌词：core 当前的 now_playing 契约只吃 title/artist，故默认关闭。
-        # 打开后歌词会随 metadata.now_playing.lyric 一起推上去（core 忽略它，
-        # 待将来扩展通道即可启用）。
+        # 歌词：宿主 ambient 契约只承诺 text/data 透传给 prompt，默认关闭。
+        # 打开后歌词会随 ambient.data.lyric 一起推上去（B 通道不单独带歌词）。
         self._include_lyric = _env_bool("NOW_PLAYING_INCLUDE_LYRIC", False)
 
     # ------------------------------------------------------------------
@@ -222,30 +271,37 @@ class NowPlayingPlugin(NekoPluginBase):
         return text
 
     def _push(self, payload: dict[str, Any]) -> Any:
-        """推一条 now_playing 旁路事件；失败只记日志，不抛。"""
+        """推一条宿主 ambient 环境快照；失败只记日志，不抛。"""
 
-        now_playing = {
+        text = self._format_text(payload)
+        data: dict[str, Any] = {
             "playing": bool(payload.get("playing")),
             "title": payload.get("title") or "",
             "artist": payload.get("artist") or "",
             "source_app_id": payload.get("source_app_id"),
         }
         if payload.get("lyric"):
-            now_playing["lyric"] = payload["lyric"]
+            data["lyric"] = payload["lyric"]
         metadata = {
-            "context_type": _CONTEXT_TYPE,
-            "now_playing": now_playing,
+            "context_type": "ambient",
+            "ambient": {
+                "provider": _AMBIENT_PROVIDER,
+                "ttl_s": self._ambient_ttl_s,
+                "priority": _AMBIENT_PRIORITY,
+                "text": text,
+                "data": data,
+            },
         }
         try:
             return self.push_message(
-                parts=[{"type": "text", "text": self._format_text(payload)}],
-                ai_behavior="read",
+                parts=[{"type": "text", "text": text}],
                 visibility=[],
-                coalesce_key=_COALESCE_KEY,
+                ai_behavior="blind",
+                coalesce_key=_AMBIENT_COALESCE_KEY,
                 metadata=metadata,
             )
         except Exception:
-            self.logger.exception("[now_playing] push_message 失败")
+            self.logger.exception("[now_playing] ambient push_message 失败")
             return None
 
     def _push_chat_context(self, payload: dict[str, Any]) -> Any:
@@ -303,9 +359,9 @@ class NowPlayingPlugin(NekoPluginBase):
         playing = bool(payload.get("playing"))
         was_playing = bool(previous and previous[0])
 
-        # 播放中 → 每次 tick 都推（刷新 core 的 30s 新鲜度）；
+        # 播放中 → 每次 tick 都推（刷新 ambient 快照，撑住 ttl）；
         # 从「在放」跌到「没在放」→ 推一条 playing=False；
-        # 一直没在放 → 不推（core 侧 getter 本就会返回 None，等价）。
+        # 一直没在放 → 不推（宿主过期后自然当没在放）。
         if playing or was_playing:
             if self._push(payload) is not None:
                 with self._lock:
